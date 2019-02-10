@@ -1,0 +1,77 @@
+---
+title: "Pred Win Cand Notebook"
+author: "John Dixon"
+date: "August 20, 2018"
+output: html_document
+---
+
+Define the connection
+```{r}
+library(RODBC)
+library(dplyr)
+library(sqldf)
+sqa.conn <- odbcDriverConnect('driver={SQL Server};server=amtrowsqldev05\\tab_sqa;database=AnalyticsMapping;uid=tab_reader;pwd=T*M8V/6tTO/k')
+ prd.conn <- odbcDriverConnect('driver={SQL Server};server=amtrowsqlprd20\\tab_prd;database=AnalyticsMapping;uid=tab_reader;pwd=~T]zeJ/[1)*?')
+ 
+data <- sqlQuery(sqa.conn, "select * from dbo.vPredWinCand")
+head(data)
+```
+
+Do Some Pre
+```{r}
+load("C:/Users/johd003/Desktop/Git/predicting-win-candidate/rawdata/df_cand.Rdata")
+data <- df_cand
+data <- data %>% select(-c(req_id,src_sys_cd))
+save(data, file='rawdata/df_cand.Rdata')
+```
+
+
+
+```{r}
+data$WinLose <- as.factor(data$WinLose)
+set.seed(123)
+library(dplyr)
+train <- sample_frac(data, .8)
+test <- sample_frac(data,.2)
+```
+
+Setup h2o frames
+```{r}
+library(h2o)
+localH2O <- h2o.init()
+train.h2o <- as.h2o(train)
+test.h2o <- as.h2o(test)
+colnames(train.h2o)
+target.var <- 'WinLose'
+drop.vars <- c(target.var, 'req_id', 'Result')
+pred.vars <- setdiff(colnames(train.h2o),drop.vars)
+```
+
+```{r}
+gbm <-  h2o.gbm(y =target.var
+                        , x = pred.vars
+                        , training_frame = train.h2o
+                        , distribution = "bernoulli"
+                        , balance_classes = TRUE
+                        , validation_frame = test.h2o
+                        , 
+                        , nbins_cats = 3
+)
+
+gbm.perf <- h2o.performance(gbm, newdata = test.h2o)
+h2o.confusionMatrix(gbm.perf)
+```
+```{r}
+gbm_var_imp <-  h2o.varimp(gbm)
+gbm_var_imp
+```
+
+```{r}
+h2o.partialPlot(gbm,data = train.h2o, cols = 'SubRank')
+```
+
+```{r}
+h2o.download_mojo(gbm, path = 'my_gbm_mojo.zip')
+h2o.download_pojo(gbm)
+```
+
